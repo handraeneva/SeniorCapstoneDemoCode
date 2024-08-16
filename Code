@@ -1,0 +1,275 @@
+#include <mwc_stepper.h>
+#include "SPI.h"
+#include "Adafruit_GFX.h"
+#include "Adafruit_ILI9341.h"
+#include <Wire.h>
+#include <SPI.h>
+#include <Adafruit_BMP280.h>
+
+//Pressure sensor pins
+#define HX710_OUT_PIN 2
+#define HX710_SCK_PIN 3
+
+//motor 1
+#define EN_PIN 27 //(3) purple
+#define DIR_PIN 25 // 2 white
+#define STEP_PIN 23 //5 orange
+//motor 2
+#define EN_PIN_2 41
+#define DIR_PIN_2 39
+#define STEP_PIN_2 37
+#define CLOCKWISE 1
+#define COUNTERCLOCKWISE 0
+
+//Limit Switch 
+#define home_limsw 13
+#define SPEED 250
+#define Total_Steps 6400
+
+// Motor objects
+MWCSTEPPER nema17(EN_PIN, DIR_PIN, STEP_PIN);
+MWCSTEPPER nema17_2(EN_PIN_2, DIR_PIN_2, STEP_PIN_2);
+
+//LCD Pins
+#define TFT_DC 47 //47; single - > danny suggested pin 48, mnaking it 49
+#define TFT_CS 53 // 53 single
+#define TFT_MOSI 51 //51 connected to T_DIN
+#define TFT_CLK 52 //52 connected to SCK
+#define TFT_RST 48 // 48 reset, single - > danny suggested 49, keeping at 48
+#define TFT_MISO 50 //50 connected to T_DO
+
+// Create objects
+Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_MOSI, TFT_CLK, TFT_RST, TFT_MISO);
+Adafruit_BMP280 bmp;
+ 
+void clearScreen();
+void blackScreen();
+unsigned long welcomeMessage();
+unsigned long warningMessage();
+unsigned long emergencyStop();
+
+// Define variables
+int pressurePsi;
+const int ledPin = 12; // defining the indicator light
+int steps;
+float ROT = 0.31;
+float distance = 2;
+float rot_distance = distance/ROT;
+void motor();
+// Function prototypes
+
+void setup() {
+  pinMode(HX710_OUT_PIN, INPUT);   // Connect HX710 OUT to UNO pin 2, MEGA pin 
+  pinMode(HX710_SCK_PIN, OUTPUT);  // Connect HX710 SCK to Arduino pin 3
+  Serial.begin(9600);
+  Serial.println("Displaying Welcome message!");
+
+  tft.begin();
+  tft.setRotation(3); // Set rotation to 270 degrees
+
+  Serial.print(F("Welcome User"));
+  Serial.println(welcomeMessage());
+  delay(3000);
+
+  Serial.println(F("Done!"));
+  // Initialize LED pin
+  pinMode(ledPin, OUTPUT); // Set the LED pin as an output
+  digitalWrite(ledPin, HIGH); // Turn on the LED a 
+  //Motor setup
+  nema17.init();
+  nema17_2.init(); //nema17.active(DEACTIVE); //nema17_2.active(DEACTIVE);
+ 
+  // LIMIT SWITCH identifying home AT setup of code
+  pinMode(home_limsw, INPUT_PULLUP);
+  while(digitalRead(home_limsw)){
+    // motor told to rotate counterclockwise until hit limit switch
+    nema17.set(COUNTERCLOCKWISE, SPEED, Total_Steps);
+    nema17_2.set(COUNTERCLOCKWISE, SPEED, Total_Steps);
+    //both motors start to run
+    nema17.run();
+    nema17_2.run();
+    delay(1);
+  }
+  while(!digitalRead(home_limsw)){
+    // move back counterclockwise until switch is deactivated to determine a good origin
+    nema17.set(CLOCKWISE, SPEED, Total_Steps);
+    nema17_2.set(CLOCKWISE, SPEED, Total_Steps);
+    //both motors start to run
+    nema17.run();
+    nema17_2.run();
+    // has to be double the delay in first loop
+    delay(2);  
+  }
+  //declare this position it has found to be 0.
+  steps = 1;
+
+
+ 
+}
+
+void loop() {
+  if (pressurePsi > 0.1065){
+    for (int i = 0; i < 10; i++){
+        warningMessage();
+        emergencyStop();
+        
+        clearScreen();
+    }
+  }
+
+  else{
+    displayPressure();
+    motor();
+  //}
+  //clearScreen();
+ 
+  /*for (int i = 0; i < 3; i++) {
+    warningMessage();
+    delay(1000);
+    blackScreen();
+    clearScreen();
+    delay(500);
+  }
+
+  for (int i = 0; i < 2; i++) {
+    emergencyStop();
+    delay(1000);
+    clearScreen();
+    delay(500);
+  }*/
+  
+  }
+}
+
+void displayPressure() {
+  // wait for the current reading to finish
+  Serial.println("Successfully enter loop");
+  while (digitalRead(HX710_OUT_PIN)) {
+    Serial.println("Some data");
+  }
+
+  // read 24 bits
+  long result = 0;
+  for (int i = 0; i < 24; i++) {
+    digitalWrite(HX710_SCK_PIN, HIGH);
+    digitalWrite(HX710_SCK_PIN, LOW);
+    result = result << 1;
+    if (digitalRead(HX710_OUT_PIN)) { 
+      result++;
+    }
+  }
+
+  // get the 2's complement
+  result = result ^ 0x800000;
+
+  // Conversion factor from mbar to psi
+  float mbarToPsi = 0.0145037738;
+
+  // Convert the pressure from mbar to psi
+  float pressurePsi = (result * mbarToPsi) / 1000000;
+
+  // Pulse the clock line 3 times to start the next pressure reading
+  for (char i = 0; i < 3; i++) {
+    digitalWrite(HX710_SCK_PIN, HIGH);
+    digitalWrite(HX710_SCK_PIN, LOW);
+  }
+
+  // Clear screen before displaying pressure
+  tft.fillScreen(ILI9341_WHITE);
+
+  // Display pressure in psi
+  tft.setTextColor(ILI9341_BLACK); 
+  tft.setTextSize(4);
+  tft.setCursor(20, 60);
+  tft.println("Pressure: "); 
+  tft.setTextSize(4);
+  tft.setCursor(20, 110);
+  tft.println(pressurePsi, 4); // Display pressure in psi with 2 decimal places
+  tft.setTextSize(4);
+  tft.setCursor(180, 110);
+  tft.println("psi");
+
+}
+
+//WELCOME MESSAGE
+unsigned long welcomeMessage() {
+  tft.fillScreen(ILI9341_WHITE);
+  unsigned long start = micros();
+  tft.setCursor(15, 100);
+  tft.setTextColor(ILI9341_BLACK);  
+  tft.setTextSize(4);
+  tft.println("Welcome User");
+  return micros() - start;
+}
+
+//WARNING MESSAGE
+unsigned long warningMessage() {
+  tft.fillScreen(ILI9341_WHITE);
+  unsigned long start = micros();
+  tft.setCursor(70, 80);
+  tft.setTextColor(ILI9341_BLACK);  
+  tft.setTextSize(5);
+  tft.println("Warning!");
+  tft.println("Emergency!");
+
+  return micros() - start;
+}
+
+//EMERGENCY STOP
+unsigned long emergencyStop() {
+  tft.fillScreen(ILI9341_WHITE);
+  tft.setTextColor(ILI9341_BLACK); 
+  unsigned long start = micros();
+  tft.setTextSize(5);
+  tft.setCursor(40, 60); 
+  tft.println("Press");
+  tft.setCursor(40, 100); 
+  tft.println("Emergency");
+  tft.setCursor(40, 140); 
+  tft.println("Stop");
+
+
+  return micros() - start;
+}
+
+// Definition of clearScreen function
+void clearScreen() {
+  tft.fillScreen(ILI9341_WHITE);
+}
+void blackScreen() {
+  tft.fillScreen(ILI9341_BLACK);
+}
+
+void motor() {
+  //displayPressure();
+  Serial.println("Homing Successful");
+  //time to delay between next break delivery, this is 2 seconds
+  delay(2000);
+  rot_distance = constrain(rot_distance, 0.0, 11.29);
+  float rot_x_tot_steps = round(rot_distance*Total_Steps); //this is saying Rotations * # of step
+  int final_steps = abs(round(rot_x_tot_steps));
+  // will never allow the distance (steps) to be greater than 3.5 inches
+  if(rot_x_tot_steps>65500){
+    rot_x_tot_steps = 65500;
+  }
+  Serial.println(rot_distance);
+  Serial.println(Total_Steps);
+  Serial.println(rot_x_tot_steps);
+  // clockwise rotation
+  Serial.println("Setting motor to clockwise direction");
+  nema17.set(CLOCKWISE, SPEED, Total_Steps);
+  nema17_2.set(CLOCKWISE, SPEED, Total_Steps);
+      for (size_t i = 0; i < rot_x_tot_steps; i++){
+        nema17.run();
+        nema17_2.run();
+      }
+  //counterclockwise rotation
+  Serial.println("Setting motor to counterclockwise direction");
+  nema17.set(COUNTERCLOCKWISE, SPEED, Total_Steps);
+  nema17_2.set(COUNTERCLOCKWISE, SPEED, Total_Steps);
+  for (size_t i = 0; i < rot_x_tot_steps; i++){
+    nema17.run();
+    nema17_2.run();
+  }
+  //delay(2000);
+}
