@@ -112,7 +112,6 @@ void loop() {
     for (int i = 0; i < 10; i++){
         warningMessage();
         emergencyStop();
-        
         clearScreen();
     }
   }
@@ -122,21 +121,6 @@ void loop() {
     motor();
   //}
   //clearScreen();
- 
-  /*for (int i = 0; i < 3; i++) {
-    warningMessage();
-    delay(1000);
-    blackScreen();
-    clearScreen();
-    delay(500);
-  }
-
-  for (int i = 0; i < 2; i++) {
-    emergencyStop();
-    delay(1000);
-    clearScreen();
-    delay(500);
-  }*/
   
   }
 }
